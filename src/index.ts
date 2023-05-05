@@ -1,7 +1,13 @@
 import 'reflect-metadata';
+import path from 'path';
+import multer from 'multer';
 import express, { Express, Request, Response } from 'express';
+import { RetrievalQAChain, loadQARefineChain } from "langchain/chains";
+import { PDFLoader } from "langchain/document_loaders/fs/pdf";
 import { OpenAI } from "langchain/llms/openai";
+import { HNSWLib } from "langchain/vectorstores/hnswlib";
 import { SqlDatabase } from "langchain/sql_db";
+import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 import { createSqlAgent, SqlToolkit } from "langchain/agents";
 import { AppDataSource } from './data-source';
 import { Users } from './entity/User';
@@ -12,6 +18,17 @@ dotenv.config();
 const app: Express = express();
 const port = process.env.PORT;
 const openai_api_key = process.env.OPENAI_API_KEY;
+const config = { openAIApiKey: openai_api_key, temperature: 0.7, cache: true };
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/')
+  },
+  filename: (req, file, cb) => {
+    cb(null, file.originalname)
+  }
+});
+const upload = multer({ storage: storage });
 
 AppDataSource.initialize().then(async () => {
   app.get('/', async (req: Request, res: Response) => {
@@ -20,7 +37,7 @@ AppDataSource.initialize().then(async () => {
     });
 
     const toolkit = new SqlToolkit(db);
-    const model = new OpenAI({ openAIApiKey: openai_api_key, temperature: 0.7 });
+    const model = new OpenAI(config);
     const executor = createSqlAgent(model, toolkit);
 
     const input = `List users`;
@@ -60,6 +77,26 @@ AppDataSource.initialize().then(async () => {
         res.status(200).send(users);
       })
       .catch(error => console.log(error))
+  });
+
+  app.get('/dashboard', function (req, res) {
+    res.sendFile(path.join(__dirname, '/index.html'));
+  });
+
+  app.post('/upload', upload.single('pdf'), async (req, res) => {
+    const loader = new PDFLoader('uploads/' + req.file?.filename);
+    const docs = await loader.load();    
+    const model = new OpenAI(config);
+    const vectorStore = await HNSWLib.fromDocuments(docs, new OpenAIEmbeddings());
+    const chain = new RetrievalQAChain({
+      combineDocumentsChain: loadQARefineChain(model),
+      retriever: vectorStore.asRetriever(),
+    });
+    
+    const response = await chain.call({
+      query: req.body.prompt,
+    });
+    res.send(response);
   });
 
   app.listen(port, () => {
