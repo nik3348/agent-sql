@@ -4,6 +4,8 @@ WORKDIR /app
 
 COPY package.json ./
 
+RUN apt-get update || : && apt-get install python3 -y || : && apt-get install build-essential -y
+
 RUN npm install
 
 COPY . .
