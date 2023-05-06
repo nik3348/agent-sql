@@ -21,9 +21,7 @@ const openai_api_key = process.env.OPENAI_API_KEY;
 const config = { openAIApiKey: openai_api_key, temperature: 0.7, cache: true };
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/')
-  },
+  destination: './uploads/',
   filename: (req, file, cb) => {
     cb(null, file.originalname)
   }
@@ -85,14 +83,14 @@ AppDataSource.initialize().then(async () => {
 
   app.post('/upload', upload.single('pdf'), async (req, res) => {
     const loader = new PDFLoader('uploads/' + req.file?.filename);
-    const docs = await loader.load();    
+    const docs = await loader.load();
     const model = new OpenAI(config);
     const vectorStore = await HNSWLib.fromDocuments(docs, new OpenAIEmbeddings());
     const chain = new RetrievalQAChain({
       combineDocumentsChain: loadQARefineChain(model),
       retriever: vectorStore.asRetriever(),
     });
-    
+
     const response = await chain.call({
       query: req.body.prompt,
     });
